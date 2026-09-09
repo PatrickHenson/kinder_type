@@ -1,0 +1,32 @@
+Kinder Type
+Copyright 2026 Patrick Henson
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project depends on the following third-party software. None of it is
+vendored/bundled in this repository — it is installed separately via pip
+(see requirements in the venv) and, for Piper, invoked as an external tool.
+
+Permissive dependencies (MIT / BSD / Apache-2.0):
+  - numpy            BSD-3-Clause (+ bundled 0BSD/MIT/Zlib/CC0 components)
+  - onnxruntime       MIT
+  - pathvalidate      MIT
+  - flatbuffers       Apache-2.0
+  - protobuf          BSD-3-Clause
+  - packaging         Apache-2.0 OR BSD-2-Clause
+  - Piper voice model "en_US-amy-medium" (rhasspy/piper-voices)   MIT
+
+Weak-copyleft dependency:
+  - pygame-ce         LGPL v2.1
+    Used as an ordinary imported library, unmodified. LGPL v2.1 explicitly
+    permits linking/importing from software under any license without
+    imposing its terms on that software, provided the library itself is
+    not modified.
+
+Strong-copyleft dependency (used as an external tool only):
+  - piper-tts (the `piper` CLI)   GPL-3.0-or-later
+    This project does NOT import piper-tts as a Python library. It is
+    invoked as a separate subprocess (see SpeechEngine in game.py), with
+    text piped in and a WAV file read back out. Running an independent
+    GPL-licensed executable as a subprocess is aggregation, not linking,
+    and does not extend GPL terms to this project's own code.

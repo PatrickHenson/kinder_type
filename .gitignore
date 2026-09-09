@@ -1,0 +1,13 @@
+# Virtual environment (recreated by install.py)
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Downloaded/generated assets (fetched or built by install.py)
+voices/
+sounds/
+
+# Editor/OS cruft
+.DS_Store
