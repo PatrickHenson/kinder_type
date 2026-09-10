@@ -14,6 +14,7 @@ Run with:
 import os
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -33,6 +34,23 @@ def step(title):
     print(f"-- {title} --")
 
 
+def bootstrap_pip():
+    """Install pip into the venv via PyPA's get-pip.py, bypassing ensurepip.
+
+    Some systems (commonly Debian/Ubuntu) ship a python3-venv package that
+    creates a working venv *shell* but can't bootstrap pip into it without
+    a separate OS package — normally fixed with `sudo apt install
+    python3-venv`, but that needs root, which isn't guaranteed. get-pip.py
+    needs only network access, which install.py already requires anyway.
+    """
+    get_pip = SCRIPT_DIR / ".get-pip.py"
+    urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", str(get_pip))
+    try:
+        run([str(VENV_PYTHON), str(get_pip)])
+    finally:
+        get_pip.unlink(missing_ok=True)
+
+
 def main():
     os.chdir(SCRIPT_DIR)
     print("== Kinder Type installer ==")
@@ -46,25 +64,32 @@ def main():
         try:
             run([sys.executable, "-m", "venv", str(VENV_DIR)])
         except subprocess.CalledProcessError:
-            print("Failed to create the virtual environment.", file=sys.stderr)
-            if sys.platform.startswith("linux"):
-                print(
-                    "On Debian/Ubuntu you likely need: sudo apt install python3-venv",
-                    file=sys.stderr,
-                )
-            elif sys.platform == "darwin":
-                print(
-                    "Try installing Python from https://python.org or with: brew install python",
-                    file=sys.stderr,
-                )
-            else:
-                print(
-                    "Make sure Python was installed with the 'venv' / 'pip' components enabled.",
-                    file=sys.stderr,
-                )
-            sys.exit(1)
+            if not VENV_PYTHON.exists():
+                print("Failed to create the virtual environment.", file=sys.stderr)
+                if sys.platform.startswith("linux"):
+                    print(
+                        "On Debian/Ubuntu you likely need: sudo apt install python3-venv",
+                        file=sys.stderr,
+                    )
+                elif sys.platform == "darwin":
+                    print(
+                        "Try installing Python from https://python.org or with: brew install python",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        "Make sure Python was installed with the 'venv' / 'pip' components enabled.",
+                        file=sys.stderr,
+                    )
+                sys.exit(1)
+            # The venv shell (python binary) exists; only its own pip
+            # bootstrap failed. Handled below regardless of this branch.
     else:
         print("   .venv already exists, skipping.")
+
+    if not VENV_PIP.exists():
+        step("Bootstrapping pip inside the venv (no system ensurepip available)")
+        bootstrap_pip()
 
     step("Installing Python dependencies")
     run([str(VENV_PIP), "install", "--upgrade", "pip"], stdout=subprocess.DEVNULL)
