@@ -34,6 +34,42 @@ def step(title):
     print(f"-- {title} --")
 
 
+def create_desktop_launcher():
+    """Write a .desktop file so the game shows up in the app menu and can be
+    pinned to the taskbar (Linux only — Windows/macOS have their own,
+    different shortcut mechanisms this doesn't attempt to cover).
+
+    Always rewritten with the current SCRIPT_DIR, so it stays correct even
+    if the repo gets moved. WM_CLASS is "game.py" — confirmed via xprop
+    against a running instance, not guessed; it's however pygame/SDL names
+    the window by default when run as `python game.py`, not tied to any
+    one machine's path.
+    """
+    apps_dir = Path.home() / ".local/share/applications"
+    apps_dir.mkdir(parents=True, exist_ok=True)
+    desktop_file = apps_dir / "kinder-type.desktop"
+    desktop_file.write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Kinder Type\n"
+        "Comment=Asteroids-style typing game for beginners\n"
+        f"Exec={SCRIPT_DIR / 'run.sh'}\n"
+        f"Icon={SCRIPT_DIR / 'images' / 'logo.png'}\n"
+        "Terminal=false\n"
+        "Categories=Game;Education;\n"
+        "StartupWMClass=game.py\n"
+    )
+    desktop_file.chmod(0o755)
+    try:
+        subprocess.run(
+            ["update-desktop-database", str(apps_dir)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        pass  # not on this system; the launcher still works, just may take
+              # a moment to show up in the app menu
+
+
 def bootstrap_pip():
     """Install pip into the venv via PyPA's get-pip.py, bypassing ensurepip.
 
@@ -123,6 +159,12 @@ def main():
         run([str(VENV_PYTHON), str(SCRIPT_DIR / "generate_audio.py")])
     else:
         print("   audio already generated, skipping.")
+
+    if sys.platform.startswith("linux"):
+        step("Adding an app-menu launcher")
+        create_desktop_launcher()
+        print("   Find \"Kinder Type\" in your app menu — most desktops let you")
+        print("   right-click it there to pin it to the taskbar.")
 
     print()
     print("Install complete! Run the game with:")
