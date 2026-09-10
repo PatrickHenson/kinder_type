@@ -47,6 +47,9 @@ model, generates sound effects and music) via `install.py`, then launches
 the game. Re-running only checks for missing steps, then
 launches the game.
 
+On Linux, `install.py` also adds a "Kinder Type" entry to your app menu
+(most desktops let you right-click it there to pin it to the taskbar).
+
 You can also run the installer directly: `python3 install.py` (or
 `python install.py` on Windows).
 
