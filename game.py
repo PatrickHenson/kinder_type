@@ -32,9 +32,31 @@ import pygame
 # Config
 # ---------------------------------------------------------------------------
 
-SCREEN_W = 900
-MAIN_H = 700     # play area height
-KEYBOARD_H = 220  # beginner-mode keyboard panel height
+# Every pixel size and px/sec speed in this file is defined relative to
+# UI_SCALE, so the whole window (and everything in it) grows or shrinks
+# together from one knob, with gameplay timing/feel unchanged (speeds scale
+# right along with distances, so nothing travels the screen any faster or
+# slower in real time — it just looks bigger).
+#
+# Held at 1.0 on purpose: Beginner mode's window height is MAIN_H +
+# KEYBOARD_H (the 60%-keyboard panel), already 950px at design size.
+# 1920x1080 is still the most common resolution on both 16" laptops and 24"
+# monitors, and 950px leaves only ~130px for a taskbar and title bar — not
+# much room to spare. Raising this risks the window not fitting (clipped, or
+# needing to be manually resized/moved) on that still-very-common baseline.
+# Raise it only if you've confirmed your target displays have more vertical
+# headroom than 1080p.
+UI_SCALE = 1.0
+
+
+def px(n):
+    """Scale a design-time pixel value (at UI_SCALE 1.0) to the real size."""
+    return round(n * UI_SCALE)
+
+
+SCREEN_W = px(900)
+MAIN_H = px(700)     # play area height
+KEYBOARD_H = px(250)  # beginner-mode keyboard panel height (fits a 60%-layout reference)
 FPS = 60
 
 SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
@@ -43,7 +65,8 @@ VOICE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "voices", "en_US-amy-medium.onnx",
 )
 AUDIO_SR = 44100
-MUSIC_VOLUME = 0.35
+MUSIC_VOLUME = 0.28  # 20% quieter than the original 0.35
+SFX_VOLUME = 0.8  # 20% quieter than full volume
 
 BG_COLOR = (5, 5, 15)
 SHIP_COLOR = (200, 220, 255)
@@ -60,16 +83,26 @@ KEYBOARD_OUTLINE = (255, 255, 255)
 KEYBOARD_LETTER = (255, 255, 255)
 KEYBOARD_BLINK = (255, 40, 40)
 BLINK_PERIOD_MS = 300
+# Non-letter keys (numbers, Tab, Caps, Enter, Shift, the space row, ...) are
+# drawn dimmer than the a-z keys: they're only there so the layout reads as
+# a real keyboard, and are never highlighted or usable.
+KEYBOARD_INERT_OUTLINE = (80, 80, 100)
+KEYBOARD_INERT_LETTER = (95, 95, 115)
 
-TOP_BAR_H = 44  # keeps falling words clear of the score/lives HUD
+WRONG_KEY_FLASH_DURATION = 0.25  # seconds the target shakes/reddens after a wrong key
+WRONG_KEY_SHAKE_PX = px(8)
+WRONG_KEY_SHAKE_HZ = 16  # oscillations per second while shaking
+WRONG_KEY_COLOR = (255, 60, 60)
+
+TOP_BAR_H = px(44)  # keeps falling words clear of the score/lives HUD
 TOP_BAR_BG = (10, 10, 25)
 TOP_BAR_BORDER = (60, 60, 90)
 
-SHIP_RADIUS = 22
-LASER_SPEED = 900.0  # px/sec
-LASER_BOLT_LEN = 22  # short, so each keystroke's shot reads as a distinct bolt
-FALL_SPEED_START = 35.0  # px/sec
-FALL_SPEED_MAX = 140.0
+SHIP_RADIUS = px(22)
+LASER_SPEED = px(900)  # px/sec
+LASER_BOLT_LEN = px(22)  # short, so each keystroke's shot reads as a distinct bolt
+FALL_SPEED_START = px(35)  # px/sec
+FALL_SPEED_MAX = px(140)
 SPAWN_INTERVAL_START = 1.6  # seconds
 SPAWN_INTERVAL_MIN = 0.6
 DIFFICULTY_RAMP_TIME = 600.0  # seconds to reach max difficulty
@@ -79,7 +112,9 @@ MAX_WORDS_END = 4
 LIVES_START = 5
 
 LETTER_POOL = list("abcdefghijklmnopqrstuvwxyz")
-PUNCTUATION_POOL = list(".,!?'-")  # normal mode only; beginner never spawns these
+# Normal mode only; beginner never spawns these. Limited to unshifted keys
+# (no "!" or "?") so kids can type them without reaching for Shift.
+PUNCTUATION_POOL = list(".,'-")
 NORMAL_CHAR_POOL = LETTER_POOL + PUNCTUATION_POOL
 
 # Every 500 score, beginner mode unlocks the next word length (0 -> 3
@@ -273,6 +308,22 @@ BEGINNER_MAX_WORD_LENGTH = max(DICTIONARY_BY_LENGTH)
 # Normal mode's word pool: the same dictionary, flattened.
 ALL_WORDS = [w for words in DICTIONARY_BY_LENGTH.values() for w in words]
 
+
+def max_word_length_for_score(score):
+    """Word-length cap for a given score: starts at 3 letters, unlocks the
+    next length every BEGINNER_SCORE_PER_LENGTH points. Shared by Beginner
+    and Normal mode so both ramp up complexity the same way."""
+    return min(BEGINNER_MAX_WORD_LENGTH, 3 + score // BEGINNER_SCORE_PER_LENGTH)
+
+
+def word_pool_by_max_length(max_length):
+    """Words up to `max_length` letters, flattened across DICTIONARY_BY_LENGTH."""
+    pool = []
+    for length, words in DICTIONARY_BY_LENGTH.items():
+        if length <= max_length:
+            pool.extend(words)
+    return pool
+
 BEGINNER_WORD_Y = TOP_BAR_H + (MAIN_H - TOP_BAR_H) * 0.35
 BEGINNER_COMPLETE_DELAY = 0.2  # seconds to pause after finishing a word
 
@@ -282,7 +333,30 @@ BEGINNER_COMPLETE_DELAY = 0.2  # seconds to pause after finishing a word
 RECENT_WORDS_HISTORY = 10  # beginner: well under the 20-word 3-letter tier
 NORMAL_RECENT_HISTORY = max(15, round(len(ALL_WORDS) * 0.05))  # normal: scales with the dictionary
 
-KEY_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+# Beginner mode's keyboard panel mirrors a physical 60% keyboard layout (no
+# function row, nav cluster, or numpad) so kids learn real key positions, not
+# just an isolated a-z block. Each row is (label, width in key-units); widths
+# follow standard keycap sizes (Tab 1.5u, Caps 1.75u, Enter 2.25u, Shift
+# 2.25u/2.75u, bottom-row mods 1.25u, Space 7.5u) chosen so every row sums to
+# exactly 15 units, same as a real board — that's what keeps both edges of
+# the keyboard flush across rows. The familiar diagonal "stagger" look falls
+# out on its own from the differing first-key widths (Tab/Caps/Shift), the
+# same way it does on a physical keyboard — no per-row shift needed. Only
+# single-letter keys are ever highlighted/typeable — everything else is a
+# dim, inert reference key.
+KEYBOARD_ROWS = [
+    [("`", 1), ("1", 1), ("2", 1), ("3", 1), ("4", 1), ("5", 1), ("6", 1),
+     ("7", 1), ("8", 1), ("9", 1), ("0", 1), ("-", 1), ("=", 1), ("Bksp", 2)],
+    [("Tab", 1.5), ("Q", 1), ("W", 1), ("E", 1), ("R", 1), ("T", 1), ("Y", 1),
+     ("U", 1), ("I", 1), ("O", 1), ("P", 1), ("[", 1), ("]", 1), ("\\", 1.5)],
+    [("Caps", 1.75), ("A", 1), ("S", 1), ("D", 1), ("F", 1), ("G", 1), ("H", 1),
+     ("J", 1), ("K", 1), ("L", 1), (";", 1), ("'", 1), ("Enter", 2.25)],
+    [("Shift", 2.25), ("Z", 1), ("X", 1), ("C", 1), ("V", 1), ("B", 1), ("N", 1),
+     ("M", 1), (",", 1), (".", 1), ("/", 1), ("Shift", 2.75)],
+    [("Ctrl", 1.25), ("Win", 1.25), ("Alt", 1.25), ("Space", 7.5),
+     ("Alt", 1.25), ("Fn", 1.25), ("Ctrl", 1.25)],
+]
+KEYBOARD_ROW_UNITS = 15  # every row above sums to this many key-units
 
 
 class FallingWord:
@@ -317,7 +391,8 @@ class Laser:
     def update(self, dt):
         self.x += self.vx * dt
         self.y += self.vy * dt
-        if self.x < -50 or self.x > SCREEN_W + 50 or self.y < -50 or self.y > MAIN_H + 50:
+        margin = px(50)
+        if self.x < -margin or self.x > SCREEN_W + margin or self.y < -margin or self.y > MAIN_H + margin:
             self.alive = False
 
 
@@ -334,21 +409,22 @@ def draw_ship(surface, center, angle_rad):
     cos_a = math.cos(angle_rad)
     sin_a = math.sin(angle_rad)
     rotated = []
-    for px, py in points:
-        rx = px * cos_a - py * sin_a
-        ry = px * sin_a + py * cos_a
+    for point_x, point_y in points:
+        rx = point_x * cos_a - point_y * sin_a
+        ry = point_x * sin_a + point_y * cos_a
         rotated.append((cx + rx, cy + ry))
 
-    pygame.draw.polygon(surface, SHIP_COLOR, rotated, width=2)
+    pygame.draw.polygon(surface, SHIP_COLOR, rotated, width=px(2))
 
 
 def pick_new_text(existing_texts, recent_texts=(), score=0):
     """Pick a letter/punctuation mark or word not already falling or recently
     used. Single characters get rarer as score rises (50% chance at score 0,
-    tapering to a 10% floor by score 3000)."""
+    tapering to a 10% floor by score 3000). Word length is capped the same
+    way as Beginner mode, so Normal mode also starts simple and ramps up."""
     letter_chance = max(0.1, 0.5 - (score / 3000) * 0.4)
     use_word = random.random() >= letter_chance
-    pool = ALL_WORDS if use_word else NORMAL_CHAR_POOL
+    pool = word_pool_by_max_length(max_word_length_for_score(score)) if use_word else NORMAL_CHAR_POOL
     avoid = set(existing_texts) | set(recent_texts)
     choices = [t for t in pool if t not in avoid]
     if not choices:
@@ -473,19 +549,19 @@ class Game:
         pygame.display.set_caption("Kinder Type")
         self.screen = pygame.display.set_mode((SCREEN_W, MAIN_H))
         self.clock = pygame.time.Clock()
-        self.font_word = pygame.font.SysFont("dejavusansmono", 32)
-        self.font_target = pygame.font.SysFont("dejavusansmono", 48)
-        self.font_hud = pygame.font.SysFont("dejavusansmono", 24)
-        self.font_big = pygame.font.SysFont("dejavusansmono", 64)
-        self.font_menu_title = pygame.font.SysFont("dejavusansmono", 56)
-        self.font_menu_option = pygame.font.SysFont("dejavusansmono", 30)
-        self.font_menu_badge = pygame.font.SysFont("dejavusansmono", 30, bold=True)
-        self.font_key = pygame.font.SysFont("dejavusansmono", 26)
+        self.font_word = pygame.font.SysFont("dejavusansmono", px(32))
+        self.font_target = pygame.font.SysFont("dejavusansmono", px(48))
+        self.font_hud = pygame.font.SysFont("dejavusansmono", px(24))
+        self.font_big = pygame.font.SysFont("dejavusansmono", px(64))
+        self.font_menu_title = pygame.font.SysFont("dejavusansmono", px(56))
+        self.font_menu_option = pygame.font.SysFont("dejavusansmono", px(30))
+        self.font_menu_badge = pygame.font.SysFont("dejavusansmono", px(30), bold=True)
+        self.font_key = pygame.font.SysFont("dejavusansmono", px(18))
 
         self.logo_image = None
         try:
             logo = pygame.image.load(LOGO_PATH).convert_alpha()
-            badge_h = 28
+            badge_h = px(28)
             badge_w = round(badge_h * logo.get_width() / logo.get_height())
             self.logo_image = pygame.transform.smoothscale(logo, (badge_w, badge_h))
         except (pygame.error, FileNotFoundError):
@@ -502,7 +578,7 @@ class Game:
         pygame.mixer.music.set_volume(0.0 if self.muted else MUSIC_VOLUME)
         for sound in (self.laser_sound, self.fail_sound):
             if sound is not None:
-                sound.set_volume(0.0 if self.muted else 1.0)
+                sound.set_volume(0.0 if self.muted else SFX_VOLUME)
 
     # -- setup -------------------------------------------------------------
 
@@ -512,7 +588,9 @@ class Game:
         try:
             pygame.mixer.init(frequency=AUDIO_SR, size=-16, channels=2)
             self.laser_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "laser.wav"))
+            self.laser_sound.set_volume(SFX_VOLUME)
             self.fail_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "fail.wav"))
+            self.fail_sound.set_volume(SFX_VOLUME)
             pygame.mixer.music.load(os.path.join(SOUNDS_DIR, "music_loop.wav"))
             pygame.mixer.music.set_volume(MUSIC_VOLUME)
             pygame.mixer.music.play(loops=-1)
@@ -520,7 +598,7 @@ class Game:
             pass  # no audio device available; game still runs silently
 
     def reset(self):
-        self.ship_pos = (SCREEN_W // 2, MAIN_H - 60)
+        self.ship_pos = (SCREEN_W // 2, MAIN_H - px(60))
         self.ship_angle = 0.0
         self.words = []
         self.lasers = []
@@ -531,6 +609,7 @@ class Game:
         self.target = None  # currently locked FallingWord being typed
         self.game_over = False
         self.beginner_spawn_timer = 0.0  # counts down after a word is completed
+        self.wrong_key_timer = 0.0  # counts down the shake/flash after a wrong key
         self.recent_words = deque(maxlen=RECENT_WORDS_HISTORY)
         self.recent_normal_texts = deque(maxlen=NORMAL_RECENT_HISTORY)
 
@@ -573,22 +652,14 @@ class Game:
         existing = {w.text for w in self.words}
         text = pick_new_text(existing, self.recent_normal_texts, self.score)
         self.recent_normal_texts.append(text)
-        margin = 40
+        margin = px(40)
         half_w = self.font_word.size(text)[0] / 2
         min_x, max_x = margin + half_w, SCREEN_W - margin - half_w
         x = random.randint(round(min_x), round(max_x)) if min_x < max_x else SCREEN_W // 2
-        self.words.append(FallingWord(text, x, TOP_BAR_H - 20.0, self.current_fall_speed()))
+        self.words.append(FallingWord(text, x, TOP_BAR_H - px(20), self.current_fall_speed()))
 
     def beginner_word_pool(self):
-        max_len = min(
-            BEGINNER_MAX_WORD_LENGTH,
-            3 + self.score // BEGINNER_SCORE_PER_LENGTH,
-        )
-        pool = []
-        for length, words in DICTIONARY_BY_LENGTH.items():
-            if length <= max_len:
-                pool.extend(words)
-        return pool
+        return word_pool_by_max_length(max_word_length_for_score(self.score))
 
     def spawn_beginner_word(self):
         pool = self.beginner_word_pool()
@@ -616,6 +687,8 @@ class Game:
                         self.beginner_spawn_timer = BEGINNER_COMPLETE_DELAY
                     elif self.mode == "normal":
                         self.speech.say(finished.text)
+            else:
+                self.on_wrong_key()
             return
 
         # No target locked yet (normal mode): find a word starting with this char.
@@ -631,6 +704,11 @@ class Game:
             self.destroy_word(chosen)
             self.target = None
             self.speech.say(chosen.text)
+
+    def on_wrong_key(self):
+        self.wrong_key_timer = WRONG_KEY_FLASH_DURATION
+        if self.fail_sound is not None:
+            self.fail_sound.play()
 
     def char_target_pos(self, word, index):
         """Screen position of the character at `index` within `word`'s rendered text."""
@@ -668,6 +746,9 @@ class Game:
 
         self.elapsed += dt
 
+        if self.wrong_key_timer > 0.0:
+            self.wrong_key_timer = max(0.0, self.wrong_key_timer - dt)
+
         if self.mode == "beginner" and self.beginner_spawn_timer > 0.0:
             self.beginner_spawn_timer -= dt
             if self.beginner_spawn_timer <= 0.0:
@@ -688,7 +769,7 @@ class Game:
         self.lasers = [l for l in self.lasers if l.alive]
 
         if self.mode == "normal":
-            reached_bottom = [w for w in self.words if w.y >= MAIN_H - 40]
+            reached_bottom = [w for w in self.words if w.y >= MAIN_H - px(40)]
             for word in reached_bottom:
                 self.words.remove(word)
                 if word is self.target:
@@ -717,29 +798,29 @@ class Game:
         self.screen.fill(BG_COLOR)
 
         title_surf = self.font_menu_title.render("Kinder Type", True, MENU_TITLE_COLOR)
-        title_rect = title_surf.get_rect(center=(SCREEN_W // 2, MAIN_H // 2 - 120))
+        title_rect = title_surf.get_rect(center=(SCREEN_W // 2, MAIN_H // 2 - px(120)))
         self.screen.blit(title_surf, title_rect)
 
-        self.draw_menu_option("1", "Beginner Mode", MAIN_H // 2 - 10)
-        self.draw_menu_option("2", "Normal Mode", MAIN_H // 2 + 60)
+        self.draw_menu_option("1", "Beginner Mode", MAIN_H // 2 - px(10))
+        self.draw_menu_option("2", "Normal Mode", MAIN_H // 2 + px(60))
 
         mute_label = "M to unmute" if self.muted else "M to mute"
         hint = self.font_hud.render(f"Esc to quit   •   {mute_label}", True, TEXT_COLOR)
-        hint_rect = hint.get_rect(center=(SCREEN_W // 2, MAIN_H // 2 + 140))
+        hint_rect = hint.get_rect(center=(SCREEN_W // 2, MAIN_H // 2 + px(140)))
         self.screen.blit(hint, hint_rect)
 
         pygame.display.flip()
 
     def draw_menu_option(self, number, text, y):
-        badge_size = 46
-        gap = 16
+        badge_size = px(46)
+        gap = px(16)
 
         text_surf = self.font_menu_option.render(text, True, MENU_OPTION_COLOR)
         total_w = badge_size + gap + text_surf.get_width()
         start_x = (SCREEN_W - total_w) / 2
 
         badge_rect = pygame.Rect(start_x, y - badge_size / 2, badge_size, badge_size)
-        pygame.draw.rect(self.screen, TARGET_COLOR, badge_rect, width=3, border_radius=8)
+        pygame.draw.rect(self.screen, TARGET_COLOR, badge_rect, width=px(3), border_radius=px(8))
         num_surf = self.font_menu_badge.render(number, True, TARGET_COLOR)
         num_rect = num_surf.get_rect(center=badge_rect.center)
         self.screen.blit(num_surf, num_rect)
@@ -754,13 +835,18 @@ class Game:
             typed_part = word.text[:word.typed]
             rest_part = word.text[word.typed:]
             is_target = word is self.target
+            shaking = is_target and self.wrong_key_timer > 0.0
 
             typed_surf = word_font.render(typed_part, True, LASER_COLOR)
-            rest_color = TARGET_COLOR if is_target else TEXT_COLOR
+            rest_color = WRONG_KEY_COLOR if shaking else (TARGET_COLOR if is_target else TEXT_COLOR)
             rest_surf = word_font.render(rest_part, True, rest_color)
 
             total_w = typed_surf.get_width() + rest_surf.get_width()
-            start_x = word.x - total_w // 2
+            x_shake = 0.0
+            if shaking:
+                phase = self.wrong_key_timer * WRONG_KEY_SHAKE_HZ * 2 * math.pi
+                x_shake = WRONG_KEY_SHAKE_PX * math.sin(phase)
+            start_x = word.x - total_w // 2 + x_shake
             self.screen.blit(typed_surf, (start_x, word.y))
             self.screen.blit(rest_surf, (start_x + typed_surf.get_width(), word.y))
 
@@ -768,31 +854,32 @@ class Game:
             dist = math.hypot(laser.vx, laser.vy) or 1.0
             dirx, diry = laser.vx / dist, laser.vy / dist
             tail = (laser.x - dirx * LASER_BOLT_LEN, laser.y - diry * LASER_BOLT_LEN)
-            pygame.draw.line(self.screen, LASER_COLOR, tail, (laser.x, laser.y), width=3)
+            pygame.draw.line(self.screen, LASER_COLOR, tail, (laser.x, laser.y), width=px(3))
 
         draw_ship(self.screen, self.ship_pos, self.ship_angle)
 
         if self.game_over:
             play_center_y = TOP_BAR_H + (MAIN_H - TOP_BAR_H) // 2
             over_surf = self.font_big.render("GAME OVER", True, GAME_OVER_COLOR)
-            rect = over_surf.get_rect(center=(SCREEN_W // 2, play_center_y - 20))
+            rect = over_surf.get_rect(center=(SCREEN_W // 2, play_center_y - px(20)))
             self.screen.blit(over_surf, rect)
             hint_surf = self.font_hud.render(
                 "Press any key to return to the menu", True, TEXT_COLOR,
             )
-            hint_rect = hint_surf.get_rect(center=(SCREEN_W // 2, play_center_y + 40))
+            hint_rect = hint_surf.get_rect(center=(SCREEN_W // 2, play_center_y + px(40)))
             self.screen.blit(hint_surf, hint_rect)
 
     def draw_top_bar(self):
         rect = pygame.Rect(0, 0, SCREEN_W, TOP_BAR_H)
         pygame.draw.rect(self.screen, TOP_BAR_BG, rect)
-        pygame.draw.line(self.screen, TOP_BAR_BORDER, (0, TOP_BAR_H), (SCREEN_W, TOP_BAR_H), width=2)
+        pygame.draw.line(self.screen, TOP_BAR_BORDER, (0, TOP_BAR_H), (SCREEN_W, TOP_BAR_H), width=px(2))
 
-        score_left = 16
+        margin = px(16)
+        score_left = margin
         if self.logo_image is not None:
-            logo_rect = self.logo_image.get_rect(midleft=(16, TOP_BAR_H // 2))
+            logo_rect = self.logo_image.get_rect(midleft=(margin, TOP_BAR_H // 2))
             self.screen.blit(self.logo_image, logo_rect)
-            score_left = logo_rect.right + 10
+            score_left = logo_rect.right + px(10)
 
         score_surf = self.font_hud.render(f"Score: {self.score}", True, HUD_COLOR)
         score_rect = score_surf.get_rect(midleft=(score_left, TOP_BAR_H // 2))
@@ -800,7 +887,7 @@ class Game:
 
         if self.mode == "normal":
             lives_surf = self.font_hud.render(f"Lives: {self.lives}", True, HUD_COLOR)
-            lives_rect = lives_surf.get_rect(midright=(SCREEN_W - 16, TOP_BAR_H // 2))
+            lives_rect = lives_surf.get_rect(midright=(SCREEN_W - margin, TOP_BAR_H // 2))
             self.screen.blit(lives_surf, lives_rect)
 
     def draw_keyboard_panel(self):
@@ -810,25 +897,36 @@ class Game:
         next_char = self.target.remaining()[:1] if self.target else None
         blink_on = (pygame.time.get_ticks() // BLINK_PERIOD_MS) % 2 == 0
 
-        key_w, key_h, gap = 62, 52, 8
-        row_offsets = [0, key_w * 0.5, key_w * 1.0]
-        center_shift = row_offsets[-1] / 2
-        row_y = MAIN_H + 20
+        # `pitch` is the pixel span of one key-unit, gap included; a key's
+        # drawn rect is its unit width times the pitch, minus one gap, so
+        # rows tile edge-to-edge with no extra slop between keys. Since every
+        # row sums to the same KEYBOARD_ROW_UNITS, every row's total footprint
+        # (row_units * pitch - gap) is identical too, keeping both edges
+        # flush across rows regardless of how many keys are in each one.
+        pitch, key_h, gap = px(50), px(38), px(4)
+        row_total_w = KEYBOARD_ROW_UNITS * pitch - gap
+        start_x = (SCREEN_W - row_total_w) / 2
+        row_y = MAIN_H + px(14)
 
-        for row_index, row in enumerate(KEY_ROWS):
-            row_width = len(row) * key_w + (len(row) - 1) * gap
-            start_x = (SCREEN_W - row_width) / 2 + row_offsets[row_index] - center_shift
+        for row_index, row in enumerate(KEYBOARD_ROWS):
             y = row_y + row_index * (key_h + gap)
-            for i, ch in enumerate(row):
-                x = start_x + i * (key_w + gap)
+            x = start_x
+            for label, width_units in row:
+                key_w = width_units * pitch - gap
                 rect = pygame.Rect(x, y, key_w, key_h)
-                is_next = ch == next_char
-                color = KEYBOARD_BLINK if (is_next and blink_on) else KEYBOARD_OUTLINE
-                pygame.draw.rect(self.screen, color, rect, width=2, border_radius=6)
-                letter_color = KEYBOARD_BLINK if (is_next and blink_on) else KEYBOARD_LETTER
-                letter_surf = self.font_key.render(ch.upper(), True, letter_color)
+                is_letter_key = len(label) == 1 and label.isalpha()
+                is_next = is_letter_key and label.lower() == next_char
+                if is_next:
+                    outline_color = letter_color = KEYBOARD_BLINK if blink_on else KEYBOARD_OUTLINE
+                elif is_letter_key:
+                    outline_color, letter_color = KEYBOARD_OUTLINE, KEYBOARD_LETTER
+                else:
+                    outline_color, letter_color = KEYBOARD_INERT_OUTLINE, KEYBOARD_INERT_LETTER
+                pygame.draw.rect(self.screen, outline_color, rect, width=px(2), border_radius=px(5))
+                letter_surf = self.font_key.render(label, True, letter_color)
                 letter_rect = letter_surf.get_rect(center=rect.center)
                 self.screen.blit(letter_surf, letter_rect)
+                x += key_w + gap
 
     # -- main loop -----------------------------------------------------------
 
