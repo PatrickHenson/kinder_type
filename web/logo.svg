@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 20 175 175" font-family="Archivo, sans-serif" font-weight="800">
+  <!-- K keycap (back, upper-left) -->
+  <g transform="translate(100,85) rotate(-9)">
+    <rect x="-45" y="-45" width="90" height="90" rx="18" fill="#1a1e25" stroke="#3ee253" stroke-width="6"/>
+    <text x="-2" y="16" text-anchor="middle" font-size="56" fill="#3ee253">K</text>
+  </g>
+
+  <!-- T keycap (front, lower-right) -->
+  <g transform="translate(155,130) rotate(9)">
+    <rect x="-45" y="-45" width="90" height="90" rx="18" fill="#1a1e25" stroke="#3ee253" stroke-width="6"/>
+    <text x="4" y="16" text-anchor="middle" font-size="56" fill="#3ee253">T</text>
+  </g>
+</svg>
