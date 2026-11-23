@@ -75,3 +75,9 @@ audio) is installed automatically by `install.py`.
 
 Apache License 2.0 — see `LICENSE`. Third-party dependency licenses are
 listed in `NOTICE`.
+
+## Browser version
+
+`web/` is a static HTML5 port (play it at `http://games.home.arpa/kinder_type/` on the home lab).
+Generate its audio and word list with `.venv/bin/python build_web.py` (needs ffmpeg); the
+generated files are git-ignored. Deployment is handled by `home_lab/games/deploy.sh`.
